@@ -1,252 +1,358 @@
 import streamlit as st
+import pandas as pd
 import numpy as np
+import time
+import plotly.graph_objects as go
+from datetime import datetime
 
-# ---------------------------------------------------------
-# CẤU HÌNH GIAO DIỆN PHÂN TẦNG CAO CẤP (LIGHT & PROFESSIONAL)
-# ---------------------------------------------------------
-st.set_page_config(page_title="AI Stroke Guardian System", page_icon="🧠", layout="wide")
+# ------------------- CẤU HÌNH TRANG -------------------
+st.set_page_config(
+    page_title="Vệ sĩ thần kinh - Giám sát đột quỵ",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
+# Font chữ lớn, màu sắc thân thiện với người cao tuổi
 st.markdown("""
 <style>
-    /* Tổng thể giao diện chuyên nghiệp, sạch sẽ */
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-        background-color: #F8FAFC !important;
-        color: #0F172A !important;
+    .reportview-container .main .block-container {
+        padding-top: 2rem;
     }
-    
-    /* Thiết kế Widget Chỉ số Thông minh */
-    .metric-card {
-        background: white; border: 1px solid #E2E8F0; border-radius: 12px; 
-        padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 12px;
+    h1, h2, h3, .stMarkdown, .stButton button, .stSelectbox label {
+        font-size: 1.8rem !important;
     }
-    
-    /* Nút bấm Đạo diễn mô phỏng lớn, sắc nét */
-    .stButton>button {
-        width: 100% !important; height: 50px !important;
-        font-size: 16px !important; font-weight: 700 !important;
-        border-radius: 10px !important; transition: all 0.2s !important;
+    .stButton button {
+        height: 3.5rem;
+        font-size: 1.5rem;
+        border-radius: 20px;
+        background-color: #2E86C1;
+        color: white;
     }
-    
-    /* Khung giả lập Điện thoại Tối giản dành cho Người già (Elderly Mockup) */
-    .elder-phone-box {
-        background: #FFFFFF; border: 8px solid #1E3A8A; border-radius: 40px;
-        padding: 24px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-        min-height: 560px; display: flex; flex-direction: column; justify-content: space-between;
+    .stButton button:hover {
+        background-color: #1B4F72;
     }
-    
-    /* Nút bấm khổng lồ trên màn hình người già */
-    .elder-btn button {
-        height: 70px !important; font-size: 22px !important; font-weight: 800 !important;
-        border-radius: 16px !important; box-shadow: 0 4px 6px rgba(0,0,0,0.05) !important;
+    .css-1aumxhk {
+        background-color: #F0F2F6;
+    }
+    .big-number {
+        font-size: 4rem;
+        font-weight: bold;
+        text-align: center;
+    }
+    .warning-box {
+        background-color: #FAD7A0;
+        border-left: 10px solid #F39C12;
+        padding: 15px;
+        border-radius: 10px;
+    }
+    .danger-box {
+        background-color: #F5B7B1;
+        border-left: 10px solid #E74C3C;
+        padding: 15px;
+        border-radius: 10px;
+    }
+    .safe-box {
+        background-color: #A9DFBF;
+        border-left: 10px solid #27AE60;
+        padding: 15px;
+        border-radius: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Khởi tạo Bộ nhớ trạng thái (Session State)
-if 'step' not in st.session_state: st.session_state.step = "GĐ1" # GĐ1, GĐ2, GĐ3, GĐ5, TELE
-if 'rsrs' not in st.session_state: st.session_state.rsrs = 12
-if 'gait_deviation' not in st.session_state: st.session_state.gait_deviation = 2.5 # Độ lệch dáng đi (độ)
-if 'voice_matching' not in st.session_state: st.session_state.voice_matching = 98 # % khớp giọng gốc
+# ------------------- KHỞI TẠO SESSION STATE -------------------
+if 'baseline_built' not in st.session_state:
+    st.session_state.baseline_built = False
+    st.session_state.baseline = {
+        'face_symmetry': 0.95,      # độ cân xứng khuôn mặt (0-1)
+        'voice_clearness': 0.92,    # độ rõ giọng
+        'gait_stability': 0.90,     # độ ổn định dáng đi
+        'touch_speed': 1.0,         # tốc độ gõ tương đối
+    }
+    st.session_state.current_metrics = {
+        'face_symmetry': 0.95,
+        'voice_clearness': 0.92,
+        'gait_stability': 0.90,
+        'touch_speed': 1.0,
+    }
+    st.session_state.rsrs = 0          # Real-time Stroke Risk Score (0-100)
+    st.session_state.alert_triggered = False
+    st.session_state.response_chain_active = False
+    st.session_state.countdown = 60     # giây
+    st.session_state.final_action = None
+    st.session_state.event_log = []
 
-# Cập nhật thông số tự động dựa trên từng Giai đoạn kịch bản
-if st.session_state.step == "GĐ1":
-    st.session_state.rsrs = 14; st.session_state.gait_deviation = 2.1; st.session_state.voice_matching = 97
-elif st.session_state.step == "GĐ2":
-    st.session_state.rsrs = 45; st.session_state.gait_deviation = 14.8; st.session_state.voice_matching = 82
-elif st.session_state.step in ["GĐ3", "GĐ5", "TELE"]:
-    st.session_state.rsrs = 89; st.session_state.gait_deviation = 45.0; st.session_state.voice_matching = 34
+def log_event(msg):
+    st.session_state.event_log.append(f"{datetime.now().strftime('%H:%M:%S')} - {msg}")
 
-# =========================================================
-# BAN GIÁM ĐỐC ĐIỀU KHIỂN (SIDEBAR - DÀNH CHO BẠN BẤM DEMO)
-# =========================================================
-with st.sidebar:
-    st.markdown("<h3 style='color:#1E3A8A; margin-top:0;'>🎬 BAN ĐẠO DIỄN SỰ KIỆN</h3>", unsafe_allow_html=True)
-    st.caption("Hãy bấm lần lượt các nút dưới đây để kích hoạt tính năng thông minh của hệ thống:")
+# ------------------- HÀM TÍNH RSRS -------------------
+def compute_rsrs(metrics, baseline):
+    # So sánh từng chỉ số với baseline, tính độ lệch
+    face_diff = max(0, (baseline['face_symmetry'] - metrics['face_symmetry']) / baseline['face_symmetry'])
+    voice_diff = max(0, (baseline['voice_clearness'] - metrics['voice_clearness']) / baseline['voice_clearness'])
+    gait_diff = max(0, (baseline['gait_stability'] - metrics['gait_stability']) / baseline['gait_stability'])
+    touch_diff = max(0, (baseline['touch_speed'] - metrics['touch_speed']) / baseline['touch_speed'])
+    
+    # Trọng số: mỗi kênh góp 25% vào điểm nguy cơ
+    raw_score = (face_diff*0.25 + voice_diff*0.25 + gait_diff*0.3 + touch_diff*0.2) * 100
+    # Thêm yếu tố tuổi (68 tuổi -> tăng nhẹ)
+    age_factor = 1.1
+    rsrs = min(100, raw_score * age_factor)
+    return int(rsrs)
+
+# ------------------- MÔ PHỎNG HÀNH ĐỘNG HÀNG NGÀY -------------------
+def action_unlock_phone():
+    # Hành động mở khóa bằng Face ID -> lấy ảnh khuôn mặt
+    if not st.session_state.baseline_built:
+        # Lần đầu: ghi nhận baseline
+        st.session_state.baseline_built = True
+        log_event("📸 Lần đầu mở khóa: Đã ghi nhận baseline khuôn mặt (cân xứng 0.95)")
+        st.success("Hệ thống đã ghi nhận dấu vân tay thần kinh của ông!")
+    else:
+        # So sánh với baseline (mô phỏng kết quả bình thường)
+        current_sym = np.random.normal(st.session_state.baseline['face_symmetry'], 0.02)
+        current_sym = max(0.7, min(1.0, current_sym))
+        st.session_state.current_metrics['face_symmetry'] = current_sym
+        log_event(f"🧑 Mở khóa bằng khuôn mặt: độ cân xứng {current_sym:.2f}")
+    # Cập nhật RSRS
+    st.session_state.rsrs = compute_rsrs(st.session_state.current_metrics, st.session_state.baseline)
+
+def action_phone_call():
+    if st.session_state.baseline_built:
+        current_voice = np.random.normal(st.session_state.baseline['voice_clearness'], 0.03)
+        current_voice = max(0.6, min(1.0, current_voice))
+        st.session_state.current_metrics['voice_clearness'] = current_voice
+        log_event(f"📞 Gọi điện: độ rõ giọng {current_voice:.2f}")
+    else:
+        st.warning("Vui lòng mở khóa điện thoại lần đầu để xây dựng baseline trước.")
+    st.session_state.rsrs = compute_rsrs(st.session_state.current_metrics, st.session_state.baseline)
+
+def action_walk():
+    if st.session_state.baseline_built:
+        current_gait = np.random.normal(st.session_state.baseline['gait_stability'], 0.04)
+        current_gait = max(0.5, min(1.0, current_gait))
+        st.session_state.current_metrics['gait_stability'] = current_gait
+        log_event(f"🚶 Đi bộ: độ ổn định dáng đi {current_gait:.2f}")
+    else:
+        st.warning("Vui lòng mở khóa điện thoại lần đầu để xây dựng baseline trước.")
+    st.session_state.rsrs = compute_rsrs(st.session_state.current_metrics, st.session_state.baseline)
+
+def action_type():
+    if st.session_state.baseline_built:
+        current_touch = np.random.normal(st.session_state.baseline['touch_speed'], 0.05)
+        current_touch = max(0.5, min(1.2, current_touch))
+        st.session_state.current_metrics['touch_speed'] = current_touch
+        log_event(f"⌨️ Gõ phím: tốc độ tương đối {current_touch:.2f}")
+    else:
+        st.warning("Vui lòng mở khóa điện thoại lần đầu để xây dựng baseline trước.")
+    st.session_state.rsrs = compute_rsrs(st.session_state.current_metrics, st.session_state.baseline)
+
+def simulate_stroke():
+    """Mô phỏng các dấu hiệu đột quỵ đột ngột"""
+    st.session_state.current_metrics['face_symmetry'] = 0.55   # mặt méo
+    st.session_state.current_metrics['voice_clearness'] = 0.48 # nói ngọng
+    st.session_state.current_metrics['gait_stability'] = 0.40  # đi khập khiễng
+    st.session_state.current_metrics['touch_speed'] = 0.35     # gõ chậm, yếu
+    st.session_state.rsrs = compute_rsrs(st.session_state.current_metrics, st.session_state.baseline)
+    log_event("⚠️⚠️⚠️ PHÁT HIỆN DẤU HIỆU ĐỘT QUỴ (mặt méo, nói khó, mất thăng bằng, gõ yếu)")
+
+def reset_normal():
+    """Đưa về trạng thái bình thường"""
+    st.session_state.current_metrics = {
+        'face_symmetry': st.session_state.baseline['face_symmetry'],
+        'voice_clearness': st.session_state.baseline['voice_clearness'],
+        'gait_stability': st.session_state.baseline['gait_stability'],
+        'touch_speed': st.session_state.baseline['touch_speed'],
+    }
+    st.session_state.rsrs = compute_rsrs(st.session_state.current_metrics, st.session_state.baseline)
+    st.session_state.alert_triggered = False
+    st.session_state.response_chain_active = False
+    st.session_state.final_action = None
+    log_event("🔄 Đã đặt lại trạng thái bình thường.")
+
+# ------------------- GIAO DIỆN CHÍNH -------------------
+st.title("🧠 Vệ sĩ thần kinh - Giám sát đột quỵ thông minh 24/7")
+st.caption("Dành cho người cao tuổi sống một mình | Tự động bảo vệ không cần thao tác")
+
+# Cột thông tin người dùng
+col1, col2, col3 = st.columns([1, 2, 1])
+with col1:
+    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=100)
+    st.markdown("**Ông Minh** · 68 tuổi")
+    st.caption("Sống một mình, luôn mang theo điện thoại")
+with col2:
+    # Hiển thị điểm RSRS dạng đồng hồ gauge
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=st.session_state.rsrs,
+        title={'text': "Điểm nguy cơ đột quỵ (RSRS)", 'font': {'size': 24}},
+        delta={'reference': 70, 'increasing': {'color': "red"}},
+        gauge={
+            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+            'bar': {'color': "darkred" if st.session_state.rsrs >= 70 else "orange" if st.session_state.rsrs >= 30 else "green"},
+            'steps': [
+                {'range': [0, 30], 'color': "#A9DFBF"},
+                {'range': [30, 70], 'color': "#FAD7A0"},
+                {'range': [70, 100], 'color': "#F5B7B1"}],
+            'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': 70}}))
+    fig.update_layout(height=300)
+    st.plotly_chart(fig, use_container_width=True)
+with col3:
+    # Mức độ cảnh báo
+    if st.session_state.rsrs < 30:
+        st.markdown('<div class="safe-box"><h3>🟢 AN TOÀN</h3><p>Không có dấu hiệu bất thường. Hệ thống giám sát thụ động.</p></div>', unsafe_allow_html=True)
+    elif st.session_state.rsrs < 70:
+        st.markdown('<div class="warning-box"><h3>🟡 CẢNH BÁO NHẸ</h3><p>Có dấu hiệu bất thường nhẹ. Tăng cường giám sát.</p></div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="danger-box"><h3>🔴 NGUY CƠ CAO</h3><p>Phát hiện dấu hiệu đột quỵ rõ rệt! Kích hoạt chuỗi phản ứng khẩn cấp.</p></div>', unsafe_allow_html=True)
+
+st.markdown("---")
+
+# ------------------- MÔ PHỎNG HOẠT ĐỘNG HÀNG NGÀY -------------------
+st.subheader("📱 Hoạt động hàng ngày của ông Minh")
+col_a, col_b, col_c, col_d = st.columns(4)
+with col_a:
+    if st.button("📸 Mở khóa bằng khuôn mặt", use_container_width=True):
+        action_unlock_phone()
+with col_b:
+    if st.button("📞 Gọi điện cho con", use_container_width=True):
+        action_phone_call()
+with col_c:
+    if st.button("🚶 Đi bộ trong nhà", use_container_width=True):
+        action_walk()
+with col_d:
+    if st.button("⌨️ Nhắn tin / Gõ phím", use_container_width=True):
+        action_type()
+
+st.markdown("---")
+col_e, col_f = st.columns(2)
+with col_e:
+    if st.button("⚠️ MÔ PHỎNG DẤU HIỆU ĐỘT QUỴ", use_container_width=True, type="primary"):
+        simulate_stroke()
+with col_f:
+    if st.button("🔄 Đặt lại trạng thái bình thường", use_container_width=True):
+        reset_normal()
+
+# Hiển thị các chỉ số hiện tại
+st.subheader("📊 Chỉ số sức khỏe thần kinh theo thời gian thực")
+metrics_df = pd.DataFrame({
+    "Chỉ số": ["Cân xứng khuôn mặt", "Độ rõ giọng nói", "Ổn định dáng đi", "Tốc độ gõ phím"],
+    "Giá trị hiện tại": [
+        f"{st.session_state.current_metrics['face_symmetry']:.2f}",
+        f"{st.session_state.current_metrics['voice_clearness']:.2f}",
+        f"{st.session_state.current_metrics['gait_stability']:.2f}",
+        f"{st.session_state.current_metrics['touch_speed']:.2f}"
+    ],
+    "Baseline (bình thường)": [
+        f"{st.session_state.baseline['face_symmetry']:.2f}",
+        f"{st.session_state.baseline['voice_clearness']:.2f}",
+        f"{st.session_state.baseline['gait_stability']:.2f}",
+        f"{st.session_state.baseline['touch_speed']:.2f}"
+    ]
+})
+st.dataframe(metrics_df, use_container_width=True, hide_index=True)
+
+# ------------------- XỬ LÝ CHUỖI PHẢN ỨNG TỰ ĐỘNG (KHI RSRS >= 70) -------------------
+if st.session_state.rsrs >= 70 and not st.session_state.response_chain_active and not st.session_state.alert_triggered:
+    st.session_state.alert_triggered = True
+    st.session_state.response_chain_active = True
+    st.session_state.countdown = 60
+    log_event("🚨 KÍCH HOẠT CHUỖI PHẢN ỨNG KHẨN CẤP (RSRS ≥ 70)")
+
+if st.session_state.response_chain_active:
     st.markdown("---")
+    st.subheader("🚨 CHUỖI PHẢN ỨNG TỰ ĐỘNG ĐANG DIỄN RA")
     
-    if st.button("🟢 Kịch bản 1: Giám sát ẩn ngày thường"):
-        st.session_state.step = "GĐ1"
+    # Bước 4.1: Cảnh báo và xác minh nội bộ
+    st.markdown("### 📢 Bước 1: Cảnh báo trên điện thoại ông Minh")
+    st.info("🔊 Điện thoại phát âm thanh nhẹ, màn hình sáng: *'Ông Minh ơi, ông có ổn không? Hãy chạm vào màn hình hoặc nói 'Tôi ổn'.'*")
+    
+    # Gửi thông báo cho người thân (mô phỏng)
+    st.markdown("### 👨‍👧 Thông báo cho người thân")
+    st.warning("📱 Đã gửi SMS & App đến chị Hoa: *'Nghi ngờ đột quỵ ở bố. Hệ thống đang xác minh. Nếu không ai phản hồi, sẽ tự động gọi cấp cứu sau 60 giây.'*")
+    
+    # Tổng đài viên (tùy chọn)
+    with st.expander("🎧 Tổng đài viên (dịch vụ cao cấp)"):
+        st.write("Đã chuyển yêu cầu đến tổng đài viên trực 24/7. Tổng đài viên đang xem video từ camera và cố gắng gọi cho ông Minh.")
+        if st.button("📞 Tổng đài xác nhận nguy cơ thật (gọi cấp cứu ngay)", use_container_width=True):
+            st.session_state.final_action = "call_ambulance"
+            log_event("📞 Tổng đài viên xác nhận nguy cơ -> yêu cầu cấp cứu ngay lập tức.")
+            st.session_state.response_chain_active = False
+    
+    # Đếm ngược và các lựa chọn phản hồi
+    st.markdown("### ⏳ Xác minh từ ông Minh (thời gian chờ)")
+    col_count, col_btn1, col_btn2 = st.columns([1,2,2])
+    with col_count:
+        remaining = st.session_state.countdown
+        st.metric("Thời gian còn lại trước khi gọi cấp cứu", f"{remaining} giây")
+        # Giảm đếm ngược (mô phỏng mỗi lần nhấn nút "Tick" để demo)
+        if st.button("⏲️ Giảm 10 giây (mô phỏng thời gian)"):
+            if st.session_state.countdown > 0:
+                st.session_state.countdown -= 10
+                if st.session_state.countdown <= 0:
+                    st.session_state.final_action = "auto_call"
+                    st.session_state.response_chain_active = False
+                    log_event("⏰ Hết 60 giây, không có phản hồi -> tự động gọi cấp cứu.")
+    
+    with col_btn1:
+        if st.button("✅ TÔI ỔN (Ông Minh phản hồi)", use_container_width=True):
+            st.session_state.final_action = "cancel"
+            log_event("✅ Ông Minh phản hồi 'Tôi ổn' -> Hủy cảnh báo, tiếp tục giám sát.")
+            # Đặt lại RSRS về mức an toàn
+            reset_normal()
+            st.session_state.response_chain_active = False
+            st.rerun()
+    with col_btn2:
+        if st.button("👩‍⚕️ Người thân xác nhận gọi cấp cứu", use_container_width=True):
+            st.session_state.final_action = "call_ambulance"
+            log_event("👩‍⚕️ Chị Hoa xác nhận gọi cấp cứu.")
+            st.session_state.response_chain_active = False
+    
+    # Xử lý kết quả cuối cùng
+    if st.session_state.final_action == "call_ambulance":
+        st.error("🚑 **Hệ thống đang gọi Trung tâm Đột quỵ gần nhất...**")
+        st.markdown("""
+        **Nội dung cuộc gọi tự động:**  
+        - Địa chỉ: [tọa độ GPS]  
+        - Bệnh nhân: Ông Minh, 68 tuổi, sống một mình  
+        - Dữ liệu kèm theo: Điểm RSRS = {} , video giật camera, phân tích giọng nói bất thường.  
+        - Ghi chú: *Cảnh báo tự động - chưa có xác nhận con người. Độ tin cậy AI: 92%*  
+        """.format(st.session_state.rsrs))
+        st.balloons()
+        log_event("🚑 Đã gọi cấp cứu thành công.")
+        if st.button("Đóng cảnh báo", use_container_width=True):
+            reset_normal()
+            st.session_state.response_chain_active = False
+            st.rerun()
+    elif st.session_state.final_action == "auto_call":
+        st.error("⏰ **Hết thời gian chờ, không nhận được phản hồi. Tự động gọi cấp cứu.**")
+        st.markdown("Gói dữ liệu đã gửi đến bệnh viện kèm mức độ tin cậy AI.")
+        if st.button("Xác nhận đã xử lý", use_container_width=True):
+            reset_normal()
+            st.session_state.response_chain_active = False
+            st.rerun()
+    elif st.session_state.final_action == "cancel":
+        st.success("Đã hủy cảnh báo. Hệ thống tiếp tục giám sát.")
+        time.sleep(2)
+        st.session_state.response_chain_active = False
         st.rerun()
-        
-    if st.button("🟡 Kịch bản 2: Đi loạng choạng / Gõ sai"):
-        st.session_state.step = "GĐ2"
-        st.rerun()
-        
-    if st.button("🚨 Kịch bản 3: Biến cố ngã quỵ khẩn cấp"):
-        st.session_state.step = "GĐ3"
-        st.rerun()
-        
-    st.markdown("---")
-    st.markdown("""
-    💡 **Mẹo trình diễn:**
-    * **Cột giữa:** Show thuật toán nền, AI thu thập sóng cơ học và sinh trắc học để tính điểm RSRS.
-    * **Cột phải:** Show giao diện thực tế cực kỳ dễ dùng được thiết kế riêng cho người già trên 60 tuổi.
-    """)
 
-# =========================================================
-# BỐ CỤC CHÍNH (LAYOUT THEO CHUẨN DASHBOARD THƯƠNG MẠI)
-# =========================================================
-col_monitor, col_phone = st.columns([7, 5])
+# ------------------- NHẬT KÝ SỰ KIỆN -------------------
+with st.expander("📜 Nhật ký giám sát chi tiết"):
+    for log in reversed(st.session_state.event_log[-10:]):
+        st.text(log)
 
-# ---------------------------------------------------------
-# CỘT GIỮA: TRUNG TÂM PHÂN TÍCH TÍN HIỆU CẢM BIẾN (AI ENGINE)
-# ---------------------------------------------------------
-with col_monitor:
-    st.markdown("<h1 style='margin-bottom:0;'>🧠 AI STROKE GUARDIAN</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color:#64748B; font-size:16px;'>Trung tâm giám sát tín hiệu sinh học ngầm & Quản lý phân tầng nguy cơ RSRS</p>", unsafe_allow_html=True)
-    
-    # 1. Biểu đồ đo chỉ số RSRS tổng hợp
-    st.markdown("#### Đánh giá phân tầng nguy cơ Đột quỵ")
-    r_score = st.session_state.rsrs
-    r_color = "#10B981" if r_score < 30 else "#F59E0B" if r_score < 70 else "#EF4444"
-    r_zone = "VÙNG AN TOÀN" if r_score < 30 else "VÙNG NGHI NGỜ" if r_score < 70 else "VÙNG NGUY HIỂM CAO"
-    
-    st.markdown(f"""
-    <div style="background: white; padding: 20px; border-radius: 12px; border: 1px solid #E2E8F0;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 16px; font-weight: 600; color: #475569;">Stroke Risk Score (RSRS):</span>
-            <span style="font-size: 28px; font-weight: 800; color: {r_color};">{r_score}%</span>
-        </div>
-        <div style="background: #E2E8F0; height: 12px; border-radius: 6px; margin: 12px 0; overflow: hidden;">
-            <div style="background: {r_color}; width: {r_score}%; height: 100%;"></div>
-        </div>
-        <span style="color: {r_color}; font-weight: 700; font-size: 13px;">● Trạng thái hệ thống: {r_zone}</span>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # 2. Hệ thống biểu đồ giả lập dữ liệu cảm biến thời gian thực (Giúp bản demo cực kỳ sinh động)
-    st.markdown("#### Dữ liệu thu tập từ các kênh Cảm biến Ngầm")
-    m1, m2 = st.columns(2)
-    
-    with m1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <span style="color:#64748B; font-size:14px; font-weight:600;">🚶‍♂️ Gia tốc Vận động (Dáng đi)</span><br>
-            <span style="font-size:20px; font-weight:700;">Độ lệch trục: {st.session_state.gait_deviation}°</span>
-        </div>
-        """, unsafe_allow_html=True)
-        # Vẽ biểu đồ sóng bước đi
-        gait_wave = np.sin(np.linspace(0, 10, 50)) * (1.0 if st.session_state.step == "GĐ1" else 2.5 if st.session_state.step == "GĐ2" else 0.1)
-        st.line_chart(gait_wave, height=110, use_container_width=True)
-        
-    with m2:
-        st.markdown(f"""
-        <div class="metric-card">
-            <span style="color:#64748B; font-size:14px; font-weight:600;">🗣️ Trích xuất Âm Phổ (Giọng nói)</span><br>
-            <span style="font-size:20px; font-weight:700;">Độ khớp Baseline: {st.session_state.voice_matching}%</span>
-        </div>
-        """, unsafe_allow_html=True)
-        # Vẽ biểu đồ tần số giọng nói
-        voice_wave = np.cos(np.linspace(0, 15, 50)) * (1.5 if st.session_state.step == "GĐ1" else 1.2 if st.session_state.step == "GĐ2" else 4.0)
-        st.line_chart(voice_wave, height=110, use_container_width=True)
-
-    # 3. Bản đồ tiến trình 5 Giai đoạn của sản phẩm
-    st.markdown("#### Trạng thái chuỗi phản ứng")
-    g1 = "background:#1E3A8A; color:white;" if st.session_state.step == "GĐ1" else "background:white; color:#94A3B8;"
-    g2 = "background:#1E3A8A; color:white;" if st.session_state.step == "GĐ2" else "background:white; color:#94A3B8;"
-    g3 = "background:#1E3A8A; color:white;" if st.session_state.step == "GĐ3" else "background:white; color:#94A3B8;"
-    g5 = "background:#1E3A8A; color:white;" if st.session_state.step in ["GĐ5", "TELE"] else "background:white; color:#94A3B8;"
-    
-    st.markdown(f"""
-    <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; text-align: center;">
-        <div style="padding: 10px; border-radius: 8px; flex: 1; margin-right: 6px; border: 1px solid #E2E8F0; {g1}">1. Giám sát ngầm</div>
-        <div style="padding: 10px; border-radius: 8px; flex: 1; margin-right: 6px; border: 1px solid #E2E8F0; {g2}">2. Xác minh chủ động</div>
-        <div style="padding: 10px; border-radius: 8px; flex: 1; margin-right: 6px; border: 1px solid #E2E8F0; {g3}">3-4. Phản ứng khẩn cấp</div>
-        <div style="padding: 10px; border-radius: 8px; flex: 1; border: 1px solid #E2E8F0; {g5}">5. Cứu hộ / Điều trị</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# ---------------------------------------------------------
-# CỘT PHẢI: MÀN HÌNH ĐIỆN THOẠI DI ĐỘNG (ELDERLY-FRIENDLY UX)
-# ---------------------------------------------------------
-with col_right:
-    st.markdown("#### Giao diện thực tế trên điện thoại của Ông Minh")
-    st.markdown('<div class="elder-phone-box">', unsafe_allow_html=True)
-    
-    # KỊCH BẢN 1: GIÁM SÁT NGẦM - KHÔNG LÀM PHIỀN NGƯỜI GIÀ
-    if st.session_state.step == "GĐ1":
-        st.markdown("""
-        <div style="text-align: center; margin-top: 100px;">
-            <p style="font-size: 70px !important; margin: 0;">☀️</p>
-            <h2 style="color: #1E3A8A; margin-top: 15px; font-weight:800;">XIN CHÀO ÔNG MINH</h2>
-            <p style="color: #64748B; font-size: 18px !important; padding: 0 10px;">Trợ lý AI đang bảo vệ ông âm thầm. Chúc ông một ngày nhiều sức khỏe!</p>
-        </div>
-        """, unsafe_allow_html=True)
-        st.write(" ") # Giữ dáng khung điện thoại cân bằng
-        
-    # KỊCH BẢN 2: PHÁT HIỆN BẤT THƯỜNG - KÍCH HOẠT BÀI KIỂM TRA CHỦ ĐỘNG (RUNG MẠNH + CHỮ SIÊU TO)
-    elif st.session_state.step == "GĐ2":
-        st.markdown("""
-        <div style="text-align: center; background-color: #FFF9E6; padding: 24px; border-radius: 20px; border: 2px solid #F59E0B;">
-            <p style="font-size: 50px !important; margin: 0;">📳</p>
-            <h3 style="color: #B45309; margin-top: 5px; font-size:26px !important;">ĐIỆN THOẠI ĐANG RUNG MẠNH</h3>
-            <p style="font-size: 24px !important; font-weight: 800; color: #1E293B; margin: 15px 0;">"Ông Minh ơi, ông có khỏe không?"</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Thiết kế 2 lựa chọn khổng lồ, dễ chạm trúng cho người tay run
-        st.markdown('<div class="elder-btn">', unsafe_allow_html=True)
-        if st.button("🟢 👍 TÔI VẪN ỔN"):
-            st.session_state.step = "GĐ1"
-            st.rerun()
-        st.write(" ")
-        if st.button("🔴 ❌ TÔI ĐANG MỆT"):
-            st.session_state.step = "GĐ3"
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # KỊCH BẢN 3: BIẾN CỐ NẶNG - CHUỖI PHẢN ỨNG TỰ ĐỘNG KÍCH HOẠT ĐẾM NGƯỢC 60S
-    elif st.session_state.step == "GĐ3":
-        st.markdown("""
-        <div style="text-align: center; background-color: #FEF2F2; padding: 20px; border-radius: 20px; border: 2px solid #EF4444;">
-            <p style="font-size: 50px !important; margin: 0;">🔊</p>
-            <h3 style="color: #991B1B; margin: 0;">HỆ THỐNG PHÁT CÒI HÚ</h3>
-            <div style="font-size: 48px !important; font-weight: 900; color: #DC2626; margin: 10px 0;">60 GIÂY</div>
-            <p style="font-size: 18px !important; font-weight: bold; color: #1E293B; margin:0;">"Đang tự động chuẩn bị gọi xe cấp cứu và gửi định vị cho người thân."</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # 3 Nhánh rẽ quyết định thông minh xử lý tại giây thứ 60 như trong tài liệu thiết kế
-        st.markdown("<p style='font-size:12px; color:#64748B; font-weight:700; margin:10px 0 2px 0;'>HÀNH ĐỘNG KHẨN CẤP (QUYẾT ĐỊNH GIÂY 60):</p>", unsafe_allow_html=True)
-        st.markdown('<div class="elder-btn" style="font-size:12px;">', unsafe_allow_html=True)
-        if st.button("🙋‍♂️ Ông bấm hủy (Giọng vẫn ngọng)"):
-            st.session_state.step = "TELE"
-            st.rerun()
-        if st.button("🚒 Con cái xem Cam: GỌI 115 NGAY"):
-            st.session_state.step = "GĐ5"
-            st.rerun()
-        if st.button("⏳ Hết 60s (Tự động kích hoạt)"):
-            st.session_state.step = "GĐ5"
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # KỊCH BẢN 4: GIAI ĐOẠN 5 - XE CẤP CỨU ĐANG ĐẾN (GIAO DIỆN TRẤN AN NGƯỜI BỆNH)
-    elif st.session_state.step == "GĐ5":
-        st.markdown("""
-        <div style="text-align: center; background-color: #DCFCE7; padding: 30px; border-radius: 20px; border: 2px solid #16A34A; margin-top: 40px;">
-            <p style="font-size: 70px !important; margin: 0;">🚒</p>
-            <h2 style="color: #14532D; font-weight: 800; margin-top:10px;">XE ĐANG ĐẾN</h2>
-            <p style="font-size: 22px !important; font-weight: bold; color: #15803D; margin: 20px 0;">"Ông Minh ơi, xe cấp cứu đang đến nhà rồi. Ông hãy nằm yên và giữ bình tĩnh nhé!"</p>
-            <hr style="border-color:#A7F3D0;">
-            <p style="font-size: 14px !important; color: #475569; text-align:left;">✔️ Đã chuyển hồ sơ bệnh nền cho bệnh viện Bạch Mai<br>✔️ Người nhà đã nhận định vị định vị khẩn cấp</p>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("🔄 Tạo phiên giám sát mới"):
-            st.session_state.step = "GĐ1"
-            st.rerun()
-            
-    # KỊCH BẢN PHỤ: PHÒNG TRÁNH PHIỀN HÀ - ĐỀ XUẤT KHÁM TỪ XA (TELEHEALTH)
-    elif st.session_state.step == "TELE":
-        st.markdown("""
-        <div style="text-align: center; background-color: #E0F2FE; padding: 30px; border-radius: 20px; border: 2px solid #0284C7; margin-top: 40px;">
-            <p style="font-size: 70px !important; margin: 0;">🩺</p>
-            <h2 style="color: #0C4A6E; font-weight:800;">NỐI MÁY BÁC SĨ</h2>
-            <p style="font-size: 20px !important; color: #0369A1; margin: 20px 0;">"Hệ thống tự động kết nối cuộc gọi Video để Bác sĩ chuyên khoa kiểm tra trực quan cho ông."</p>
-            <p style="font-size: 13px !important; color: #64748B;">(Hủy lệnh gọi 115 khẩn cấp để tránh lãng phí tài nguyên y tế do báo động giả, nhưng vẫn bảo vệ an toàn cho ông)</p>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("🔄 Tạo phiên giám sát mới"):
-            st.session_state.step = "GĐ1"
-            st.rerun()
-
-    st.markdown('</div>', unsafe_allow_html=True)
+# ------------------- HƯỚNG DẪN NHANH -------------------
+st.sidebar.markdown("## 🧭 Hướng dẫn demo")
+st.sidebar.markdown("""
+1. **Xây dựng baseline**: Nhấn nút *"Mở khóa bằng khuôn mặt"* lần đầu.
+2. **Mô phỏng ngày bình thường**: Nhấn lần lượt các nút Gọi điện, Đi bộ, Gõ phím → RSRS luôn xanh.
+3. **Kích hoạt cảnh báo đỏ**: Nhấn *"Mô phỏng dấu hiệu đột quỵ"* → RSRS tăng vọt ≥ 70.
+4. **Chuỗi phản ứng**: Xuất hiện thông báo, đếm ngược 60s, bạn có thể chọn:
+   - *"Tôi ổn"* → hủy cấp cứu.
+   - *"Người thân xác nhận gọi cấp cứu"* hoặc để hết giờ → gọi cấp cứu.
+5. **Đặt lại**: Dùng nút *"Đặt lại trạng thái bình thường"* để chạy kịch bản mới.
+""")
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1790/1790910.png", width=80)
+st.sidebar.caption("Sản phẩm bảo vệ người cao tuổi 24/7 - Không cần thao tác, không phụ thuộc người thân.")
