@@ -2,8 +2,16 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import time
-import plotly.graph_objects as go
 from datetime import datetime
+
+# Kiểm tra nếu plotly chưa được cài, hiển thị hướng dẫn thay vì crash
+try:
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    st.error("⚠️ Thiếu thư viện plotly. Vui lòng chạy: pip install plotly")
+    st.stop()
 
 # ------------------- CẤU HÌNH TRANG -------------------
 st.set_page_config(
@@ -65,10 +73,10 @@ st.markdown("""
 if 'baseline_built' not in st.session_state:
     st.session_state.baseline_built = False
     st.session_state.baseline = {
-        'face_symmetry': 0.95,      # độ cân xứng khuôn mặt (0-1)
-        'voice_clearness': 0.92,    # độ rõ giọng
-        'gait_stability': 0.90,     # độ ổn định dáng đi
-        'touch_speed': 1.0,         # tốc độ gõ tương đối
+        'face_symmetry': 0.95,
+        'voice_clearness': 0.92,
+        'gait_stability': 0.90,
+        'touch_speed': 1.0,
     }
     st.session_state.current_metrics = {
         'face_symmetry': 0.95,
@@ -76,10 +84,10 @@ if 'baseline_built' not in st.session_state:
         'gait_stability': 0.90,
         'touch_speed': 1.0,
     }
-    st.session_state.rsrs = 0          # Real-time Stroke Risk Score (0-100)
+    st.session_state.rsrs = 0
     st.session_state.alert_triggered = False
     st.session_state.response_chain_active = False
-    st.session_state.countdown = 60     # giây
+    st.session_state.countdown = 60
     st.session_state.final_action = None
     st.session_state.event_log = []
 
@@ -88,34 +96,26 @@ def log_event(msg):
 
 # ------------------- HÀM TÍNH RSRS -------------------
 def compute_rsrs(metrics, baseline):
-    # So sánh từng chỉ số với baseline, tính độ lệch
     face_diff = max(0, (baseline['face_symmetry'] - metrics['face_symmetry']) / baseline['face_symmetry'])
     voice_diff = max(0, (baseline['voice_clearness'] - metrics['voice_clearness']) / baseline['voice_clearness'])
     gait_diff = max(0, (baseline['gait_stability'] - metrics['gait_stability']) / baseline['gait_stability'])
     touch_diff = max(0, (baseline['touch_speed'] - metrics['touch_speed']) / baseline['touch_speed'])
-    
-    # Trọng số: mỗi kênh góp 25% vào điểm nguy cơ
     raw_score = (face_diff*0.25 + voice_diff*0.25 + gait_diff*0.3 + touch_diff*0.2) * 100
-    # Thêm yếu tố tuổi (68 tuổi -> tăng nhẹ)
     age_factor = 1.1
     rsrs = min(100, raw_score * age_factor)
     return int(rsrs)
 
-# ------------------- MÔ PHỎNG HÀNH ĐỘNG HÀNG NGÀY -------------------
+# ------------------- MÔ PHỎNG HÀNH ĐỘNG -------------------
 def action_unlock_phone():
-    # Hành động mở khóa bằng Face ID -> lấy ảnh khuôn mặt
     if not st.session_state.baseline_built:
-        # Lần đầu: ghi nhận baseline
         st.session_state.baseline_built = True
         log_event("📸 Lần đầu mở khóa: Đã ghi nhận baseline khuôn mặt (cân xứng 0.95)")
         st.success("Hệ thống đã ghi nhận dấu vân tay thần kinh của ông!")
     else:
-        # So sánh với baseline (mô phỏng kết quả bình thường)
         current_sym = np.random.normal(st.session_state.baseline['face_symmetry'], 0.02)
         current_sym = max(0.7, min(1.0, current_sym))
         st.session_state.current_metrics['face_symmetry'] = current_sym
         log_event(f"🧑 Mở khóa bằng khuôn mặt: độ cân xứng {current_sym:.2f}")
-    # Cập nhật RSRS
     st.session_state.rsrs = compute_rsrs(st.session_state.current_metrics, st.session_state.baseline)
 
 def action_phone_call():
@@ -149,16 +149,14 @@ def action_type():
     st.session_state.rsrs = compute_rsrs(st.session_state.current_metrics, st.session_state.baseline)
 
 def simulate_stroke():
-    """Mô phỏng các dấu hiệu đột quỵ đột ngột"""
-    st.session_state.current_metrics['face_symmetry'] = 0.55   # mặt méo
-    st.session_state.current_metrics['voice_clearness'] = 0.48 # nói ngọng
-    st.session_state.current_metrics['gait_stability'] = 0.40  # đi khập khiễng
-    st.session_state.current_metrics['touch_speed'] = 0.35     # gõ chậm, yếu
+    st.session_state.current_metrics['face_symmetry'] = 0.55
+    st.session_state.current_metrics['voice_clearness'] = 0.48
+    st.session_state.current_metrics['gait_stability'] = 0.40
+    st.session_state.current_metrics['touch_speed'] = 0.35
     st.session_state.rsrs = compute_rsrs(st.session_state.current_metrics, st.session_state.baseline)
     log_event("⚠️⚠️⚠️ PHÁT HIỆN DẤU HIỆU ĐỘT QUỴ (mặt méo, nói khó, mất thăng bằng, gõ yếu)")
 
 def reset_normal():
-    """Đưa về trạng thái bình thường"""
     st.session_state.current_metrics = {
         'face_symmetry': st.session_state.baseline['face_symmetry'],
         'voice_clearness': st.session_state.baseline['voice_clearness'],
@@ -175,31 +173,31 @@ def reset_normal():
 st.title("🧠 Vệ sĩ thần kinh - Giám sát đột quỵ thông minh 24/7")
 st.caption("Dành cho người cao tuổi sống một mình | Tự động bảo vệ không cần thao tác")
 
-# Cột thông tin người dùng
 col1, col2, col3 = st.columns([1, 2, 1])
 with col1:
     st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=100)
     st.markdown("**Ông Minh** · 68 tuổi")
     st.caption("Sống một mình, luôn mang theo điện thoại")
 with col2:
-    # Hiển thị điểm RSRS dạng đồng hồ gauge
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number+delta",
-        value=st.session_state.rsrs,
-        title={'text': "Điểm nguy cơ đột quỵ (RSRS)", 'font': {'size': 24}},
-        delta={'reference': 70, 'increasing': {'color': "red"}},
-        gauge={
-            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
-            'bar': {'color': "darkred" if st.session_state.rsrs >= 70 else "orange" if st.session_state.rsrs >= 30 else "green"},
-            'steps': [
-                {'range': [0, 30], 'color': "#A9DFBF"},
-                {'range': [30, 70], 'color': "#FAD7A0"},
-                {'range': [70, 100], 'color': "#F5B7B1"}],
-            'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': 70}}))
-    fig.update_layout(height=300)
-    st.plotly_chart(fig, use_container_width=True)
+    if PLOTLY_AVAILABLE:
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number+delta",
+            value=st.session_state.rsrs,
+            title={'text': "Điểm nguy cơ đột quỵ (RSRS)", 'font': {'size': 24}},
+            delta={'reference': 70, 'increasing': {'color': "red"}},
+            gauge={
+                'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+                'bar': {'color': "darkred" if st.session_state.rsrs >= 70 else "orange" if st.session_state.rsrs >= 30 else "green"},
+                'steps': [
+                    {'range': [0, 30], 'color': "#A9DFBF"},
+                    {'range': [30, 70], 'color': "#FAD7A0"},
+                    {'range': [70, 100], 'color': "#F5B7B1"}],
+                'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': 70}}))
+        fig.update_layout(height=300)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.metric("RSRS", f"{st.session_state.rsrs} / 100")
 with col3:
-    # Mức độ cảnh báo
     if st.session_state.rsrs < 30:
         st.markdown('<div class="safe-box"><h3>🟢 AN TOÀN</h3><p>Không có dấu hiệu bất thường. Hệ thống giám sát thụ động.</p></div>', unsafe_allow_html=True)
     elif st.session_state.rsrs < 70:
@@ -208,8 +206,6 @@ with col3:
         st.markdown('<div class="danger-box"><h3>🔴 NGUY CƠ CAO</h3><p>Phát hiện dấu hiệu đột quỵ rõ rệt! Kích hoạt chuỗi phản ứng khẩn cấp.</p></div>', unsafe_allow_html=True)
 
 st.markdown("---")
-
-# ------------------- MÔ PHỎNG HOẠT ĐỘNG HÀNG NGÀY -------------------
 st.subheader("📱 Hoạt động hàng ngày của ông Minh")
 col_a, col_b, col_c, col_d = st.columns(4)
 with col_a:
@@ -234,7 +230,6 @@ with col_f:
     if st.button("🔄 Đặt lại trạng thái bình thường", use_container_width=True):
         reset_normal()
 
-# Hiển thị các chỉ số hiện tại
 st.subheader("📊 Chỉ số sức khỏe thần kinh theo thời gian thực")
 metrics_df = pd.DataFrame({
     "Chỉ số": ["Cân xứng khuôn mặt", "Độ rõ giọng nói", "Ổn định dáng đi", "Tốc độ gõ phím"],
@@ -253,7 +248,7 @@ metrics_df = pd.DataFrame({
 })
 st.dataframe(metrics_df, use_container_width=True, hide_index=True)
 
-# ------------------- XỬ LÝ CHUỖI PHẢN ỨNG TỰ ĐỘNG (KHI RSRS >= 70) -------------------
+# ------------------- CHUỖI PHẢN ỨNG TỰ ĐỘNG -------------------
 if st.session_state.rsrs >= 70 and not st.session_state.response_chain_active and not st.session_state.alert_triggered:
     st.session_state.alert_triggered = True
     st.session_state.response_chain_active = True
@@ -263,16 +258,11 @@ if st.session_state.rsrs >= 70 and not st.session_state.response_chain_active an
 if st.session_state.response_chain_active:
     st.markdown("---")
     st.subheader("🚨 CHUỖI PHẢN ỨNG TỰ ĐỘNG ĐANG DIỄN RA")
-    
-    # Bước 4.1: Cảnh báo và xác minh nội bộ
     st.markdown("### 📢 Bước 1: Cảnh báo trên điện thoại ông Minh")
     st.info("🔊 Điện thoại phát âm thanh nhẹ, màn hình sáng: *'Ông Minh ơi, ông có ổn không? Hãy chạm vào màn hình hoặc nói 'Tôi ổn'.'*")
-    
-    # Gửi thông báo cho người thân (mô phỏng)
     st.markdown("### 👨‍👧 Thông báo cho người thân")
     st.warning("📱 Đã gửi SMS & App đến chị Hoa: *'Nghi ngờ đột quỵ ở bố. Hệ thống đang xác minh. Nếu không ai phản hồi, sẽ tự động gọi cấp cứu sau 60 giây.'*")
     
-    # Tổng đài viên (tùy chọn)
     with st.expander("🎧 Tổng đài viên (dịch vụ cao cấp)"):
         st.write("Đã chuyển yêu cầu đến tổng đài viên trực 24/7. Tổng đài viên đang xem video từ camera và cố gắng gọi cho ông Minh.")
         if st.button("📞 Tổng đài xác nhận nguy cơ thật (gọi cấp cứu ngay)", use_container_width=True):
@@ -280,13 +270,11 @@ if st.session_state.response_chain_active:
             log_event("📞 Tổng đài viên xác nhận nguy cơ -> yêu cầu cấp cứu ngay lập tức.")
             st.session_state.response_chain_active = False
     
-    # Đếm ngược và các lựa chọn phản hồi
     st.markdown("### ⏳ Xác minh từ ông Minh (thời gian chờ)")
     col_count, col_btn1, col_btn2 = st.columns([1,2,2])
     with col_count:
         remaining = st.session_state.countdown
         st.metric("Thời gian còn lại trước khi gọi cấp cứu", f"{remaining} giây")
-        # Giảm đếm ngược (mô phỏng mỗi lần nhấn nút "Tick" để demo)
         if st.button("⏲️ Giảm 10 giây (mô phỏng thời gian)"):
             if st.session_state.countdown > 0:
                 st.session_state.countdown -= 10
@@ -294,12 +282,10 @@ if st.session_state.response_chain_active:
                     st.session_state.final_action = "auto_call"
                     st.session_state.response_chain_active = False
                     log_event("⏰ Hết 60 giây, không có phản hồi -> tự động gọi cấp cứu.")
-    
     with col_btn1:
         if st.button("✅ TÔI ỔN (Ông Minh phản hồi)", use_container_width=True):
             st.session_state.final_action = "cancel"
             log_event("✅ Ông Minh phản hồi 'Tôi ổn' -> Hủy cảnh báo, tiếp tục giám sát.")
-            # Đặt lại RSRS về mức an toàn
             reset_normal()
             st.session_state.response_chain_active = False
             st.rerun()
@@ -308,17 +294,16 @@ if st.session_state.response_chain_active:
             st.session_state.final_action = "call_ambulance"
             log_event("👩‍⚕️ Chị Hoa xác nhận gọi cấp cứu.")
             st.session_state.response_chain_active = False
-    
-    # Xử lý kết quả cuối cùng
+
     if st.session_state.final_action == "call_ambulance":
         st.error("🚑 **Hệ thống đang gọi Trung tâm Đột quỵ gần nhất...**")
-        st.markdown("""
+        st.markdown(f"""
         **Nội dung cuộc gọi tự động:**  
         - Địa chỉ: [tọa độ GPS]  
         - Bệnh nhân: Ông Minh, 68 tuổi, sống một mình  
-        - Dữ liệu kèm theo: Điểm RSRS = {} , video giật camera, phân tích giọng nói bất thường.  
+        - Dữ liệu kèm theo: Điểm RSRS = {st.session_state.rsrs} , video giật camera, phân tích giọng nói bất thường.  
         - Ghi chú: *Cảnh báo tự động - chưa có xác nhận con người. Độ tin cậy AI: 92%*  
-        """.format(st.session_state.rsrs))
+        """)
         st.balloons()
         log_event("🚑 Đã gọi cấp cứu thành công.")
         if st.button("Đóng cảnh báo", use_container_width=True):
@@ -343,7 +328,7 @@ with st.expander("📜 Nhật ký giám sát chi tiết"):
     for log in reversed(st.session_state.event_log[-10:]):
         st.text(log)
 
-# ------------------- HƯỚNG DẪN NHANH -------------------
+# ------------------- HƯỚNG DẪN SIDEBAR -------------------
 st.sidebar.markdown("## 🧭 Hướng dẫn demo")
 st.sidebar.markdown("""
 1. **Xây dựng baseline**: Nhấn nút *"Mở khóa bằng khuôn mặt"* lần đầu.
